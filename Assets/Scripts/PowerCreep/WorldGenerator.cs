@@ -2,8 +2,24 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+public class TilePosComp : IComparer<TilePos>
+{
+    // Compares by Height, Length, and Width.
+    public int Compare(TilePos n1, TilePos n2)
+    {
+        float d1 = n1.GetDistanceToTarget();
+        float d2 = n2.GetDistanceToTarget();
+
+        if (d1 < d2)
+            return -1;
+        else if (d1 > d2)
+            return 1;
+        return 0;
+    }
+}
+
 [System.Serializable]
-class TilePos
+public class TilePos
 {
     [SerializeField]
     int posX;
@@ -11,6 +27,11 @@ class TilePos
     int posY;
     [SerializeField]
     float perlinValue;
+    //For pathfinding
+    bool visited = false;
+    TilePos parent = null;
+    float distanceToTarget = -1.0f;
+    TilePos target = null;
 
     Path path = null;
 
@@ -41,10 +62,54 @@ class TilePos
     {
         return path;
     }
+    public static float DistanceBetween(TilePos p1, TilePos p2)
+    {
+        return (new Vector2(p1.GetPosX(), p2.GetPosY())-new Vector2(p2.GetPosX(), p2.GetPosY())).magnitude;
+    }
+    //Pathfinding
+    public void SetVisited()
+    {
+        visited = true;
+    }
+    public bool GetVisited()
+    {
+        return visited;
+    }
+    public void SetParent(TilePos tile)
+    {
+        parent = tile;
+    }
+    public TilePos GetParent()
+    {
+        return parent;
+    }
+    public void SetDistanceToTarget(float d)
+    {
+        distanceToTarget = d;
+    }
+    public float GetDistanceToTarget()
+    {
+        return distanceToTarget;
+    }
+    public void SetTarget(TilePos target)
+    {
+        this.target = target;
+    }
+    public TilePos GetTarget()
+    {
+        return target;
+    }
+    public void Reset()
+    {
+        visited = false;
+        parent = null;
+        distanceToTarget = -1.0f;
+    }
+    
 }
 
 [System.Serializable]
-class City
+public class City
 {
     List<TilePos> cityTiles;
     [SerializeField]
@@ -65,9 +130,7 @@ class City
     }
     public static float DistanceBetween(City c1, City c2)
     {
-        return Mathf.Sqrt(
-            Mathf.Pow(c1.GetCityCenter().GetPosX() - c2.GetCityCenter().GetPosX(), 2.0f),
-            Mathf.Pow(c1.GetCityCenter().GetPosY() - c2.GetCityCenter().GetPosY(), 2.0f));
+        return TilePos.DistanceBetween(c1.GetCityCenter(), c2.GetCityCenter());
     }
     public TilePos GetTilePosAt(int x, int y)
     {
@@ -80,6 +143,10 @@ class City
             }
         }
         return null;
+    }
+    public List<TilePos> GetCityTiles()
+    {
+        return cityTiles;
     }
     public void AddNewConnectedCity(City otherCity)
     {
@@ -97,6 +164,7 @@ class City
         {
             if(maxPerlinValue < 0.0f || tile.GetPerlinValue() > maxPerlinValue)
             {
+                maxPerlinValue = tile.GetPerlinValue();
                 center = tile;
             }
         }
@@ -111,7 +179,7 @@ class City
 
 }
 
-class Path
+public class Path
 {
     TilePos currentPos;
     List<TilePos> neighbors;
@@ -346,16 +414,35 @@ public class WorldGenerator : MonoBehaviour {
             
         }
         ConnectCities();
+        //Instantiate Houses around the city centers
+        foreach(var city in cities)
+        {
+            foreach(var tile in city.GetCityTiles())
+            {
+                if(tile != city.GetCityCenter() && tile.GetPath() == null)
+                {
+                    GameObject house = Instantiate(housesPrefab[Random.Range((int)HouseType.HOUSE1, (int)HouseType.HOUSE2+1)]);
+                    house.transform.position = new Vector3(
+                        tileSizeX*(tile.GetPosX()-tileNumberX/2),
+                        tileSizeY*(tile.GetPosY()-tileNumberY/2),
+                        0.0f
+                        );
+                }
+
+            }
+        }
     }
 
     void GenerateNewCity(TilePos tile)
     {
+
         //Check if not already a city
         foreach(City city in cities)
         {
             if (city.tileInCity(tile))
                 return;
         }
+        Debug.Log("Creating New City");
         List<TilePos> newCityTiles = new List<TilePos>();
         //BFS around to get the whole city
         Queue<TilePos> nextTiles = new Queue<TilePos>();
@@ -404,6 +491,7 @@ public class WorldGenerator : MonoBehaviour {
 
 	void ConnectCities()
     {
+        Debug.Log("Connecting Cities");
         foreach(var city in cities)
         {
             //Eight paths around the church
@@ -428,7 +516,7 @@ public class WorldGenerator : MonoBehaviour {
                     //Adding the neighbors paths
                     if (i == 0)
                     {
-                        if (neighbor.GetPosX() -1 != -1)
+                        if (neighbor.GetPosX() - 1 != -1)
                             neighbor.GetPath().AddNeighbor(tiles[neighbor.GetPosX() - 1, neighbor.GetPosY()]);
                         if (neighbor.GetPosX() + 1 != tileNumberX)
                             neighbor.GetPath().AddNeighbor(tiles[neighbor.GetPosX() + 1, neighbor.GetPosY()]);
@@ -442,12 +530,14 @@ public class WorldGenerator : MonoBehaviour {
                     }
                     else
                     {
-                        if (city.GetCityCenter().GetPosX() - i != tileNumberX &&
-                           city.GetCityCenter().GetPosX() - i != -1 )
-                            neighbor.GetPath().AddNeighbor(tiles[neighbor.GetPosX() - i, neighbor.GetPosY()]);
-                        if (city.GetCityCenter().GetPosY() - j != tileNumberY &&
-                           city.GetCityCenter().GetPosY() - j != -1)
-                            neighbor.GetPath().AddNeighbor(tiles[neighbor.GetPosX(), neighbor.GetPosY() - j]);
+                        if (neighbor.GetPosX() - i != tileNumberX &&
+                           neighbor.GetPosX() - i != -1 )
+                            neighbor.GetPath().AddNeighbor(
+                                tiles[neighbor.GetPosX() - i, neighbor.GetPosY()]);
+                        if (neighbor.GetPosY() - j != tileNumberY &&
+                           neighbor.GetPosY() - j != -1)
+                            neighbor.GetPath().AddNeighbor(
+                                tiles[neighbor.GetPosX(), neighbor.GetPosY() - j]);
                     }
                 }
             }
@@ -457,8 +547,16 @@ public class WorldGenerator : MonoBehaviour {
             {
                 if (otherCity == city || otherCity.AlreadyConnected(city))
                     continue;
-                
+                if (minDistance < 0.0f || City.DistanceBetween(city, otherCity) < minDistance)
+                {
+                    closestCity = otherCity;
+                    minDistance = City.DistanceBetween(city, otherCity);
+                }
             }
+
+            GeneratePath(city, closestCity);
+            closestCity.AddNewConnectedCity(city);
+            city.AddNewConnectedCity(closestCity);
         }
         //Instantiate Paths
         foreach(Path path in paths)
@@ -468,7 +566,7 @@ public class WorldGenerator : MonoBehaviour {
             {
                 GameObject pathObject = Instantiate(pathPrefab[(int)path.GetPathType()]);
                 pathObject.transform.position = new Vector3(
-                    tileSizeX * ( path.GetTilePos().GetPosX() - tileNumberX/2),
+                    tileSizeX * (path.GetTilePos().GetPosX() - tileNumberX/2),
                     tileSizeY * (path.GetTilePos().GetPosY() - tileNumberY/2),
                     0
                     );
@@ -476,9 +574,92 @@ public class WorldGenerator : MonoBehaviour {
         }
     }
 
-    void GeneratePath()
+    void GeneratePath(City origin, City target)
     {
+        //BFS with priority on direction to target
+        Debug.Log("Generating Path");
 
+        Queue<TilePos> nextTilePos = new Queue<TilePos>();
+
+        TilePos originPos = origin.GetCityCenter();
+        TilePos targetPos = target.GetCityCenter();
+
+        TilePos currentPos = originPos;
+        while(currentPos != targetPos)
+        {
+            List<TilePos> tmpPos = new List<TilePos>();
+            for(int i = -1; i <= 1; i++)
+            {
+                for(int j = -1; j <= 1; j++)
+                {
+                    if (i == j || i == -j)
+                        continue;
+                    if (currentPos.GetPosX() + i == -1 ||
+                        currentPos.GetPosX() + i == tileNumberX ||
+                        currentPos.GetPosY() + j == -1 ||
+                        currentPos.GetPosY() + j == tileNumberY)
+                        continue;
+                    TilePos neighbor = tiles[currentPos.GetPosX() + i,
+                        currentPos.GetPosY() + j];
+                    //Check if not already visited by other BFS
+                    if(neighbor.GetTarget() != targetPos)
+                        neighbor.Reset();
+                    
+                    if (neighbor.GetVisited() || neighbor.GetPerlinValue() < perlinForestDensityMax)
+                        continue;
+
+                    neighbor.SetVisited();
+                    neighbor.SetTarget(targetPos);
+                    neighbor.SetDistanceToTarget(
+                        TilePos.DistanceBetween(neighbor, targetPos)
+                        );
+                    neighbor.SetParent(currentPos);
+                    tmpPos.Add(neighbor);
+                    
+                }
+            }
+            tmpPos.Sort(new TilePosComp());
+            foreach (var neighbor in tmpPos)
+            {
+                nextTilePos.Enqueue(neighbor);
+            }
+            //nextTilePos.Sort(new TilePosComp());
+            if (nextTilePos.Count == 0)
+            {
+                break;
+            }
+            else
+            {
+                currentPos = nextTilePos.Dequeue();
+            }
+        }
+
+        //Instantiate Path
+        List<TilePos> tilePath = new List<TilePos>();
+        while (currentPos != originPos)
+        {
+            currentPos = currentPos.GetParent();
+            tilePath.Add(currentPos);
+        }
+        tilePath.Reverse();
+        for(int i = 1; i < tilePath.Count; i++)
+        {
+            currentPos = tilePath[i];
+            if(currentPos.GetPath() == null)
+            {
+                Path newPath = new Path(currentPos, new List<TilePos>());
+                currentPos.SetPath(newPath);
+                paths.Add(newPath);
+            }
+            if(i > 1)
+            {
+                currentPos.GetPath().AddNeighbor(tilePath[i - 1]);
+            }
+            if( i < tilePath.Count - 1)
+            {
+                currentPos.GetPath().AddNeighbor(tilePath[i + 1]);
+            }
+        }
     }
 	// Update is called once per frame
 	void Update () {
