@@ -32,7 +32,7 @@ public class TilePos
     TilePos parent = null;
     float distanceToTarget = -1.0f;
     TilePos target = null;
-
+	TilePos origin = null;
     Path path = null;
 
     public TilePos(int x, int y, float p)
@@ -64,8 +64,23 @@ public class TilePos
     }
     public static float DistanceBetween(TilePos p1, TilePos p2)
     {
-        return (new Vector2(p1.GetPosX(), p2.GetPosY())-new Vector2(p2.GetPosX(), p2.GetPosY())).magnitude;
+        return (new Vector2(p1.GetPosX(), p1.GetPosY())-new Vector2(p2.GetPosX(), p2.GetPosY())).magnitude;
     }
+	public static float DistanceToDiagonal(TilePos origin, TilePos target, TilePos current)
+	{
+		Vector2 originV = new Vector2 (origin.GetPosX(), origin.GetPosY());
+		Vector2 targetV = new Vector2 (target.GetPosX(), target.GetPosY());
+		Vector2 currentV = new Vector2 (current.GetPosX(), current.GetPosY());
+
+		Vector2 diagonal = (targetV - originV).normalized;
+		Vector2 currentToOrigin = currentV - originV;
+		float dotProduct = Vector2.Dot (currentToOrigin, diagonal);
+		//Debug.Log ("Dot Product: " + dotProduct+ " currentToOrigin: "+currentToOrigin);
+
+		Vector2 H = diagonal*dotProduct;
+
+		return (H-currentToOrigin).magnitude;
+	}
     //Pathfinding
     public void SetVisited()
     {
@@ -99,6 +114,14 @@ public class TilePos
     {
         return target;
     }
+	public void SetOrigin(TilePos origin)
+	{
+		this.origin = origin;
+	}
+	public TilePos GetOrigin()
+	{
+		return origin;
+	}
     public void Reset()
     {
         visited = false;
@@ -130,6 +153,8 @@ public class City
     }
     public static float DistanceBetween(City c1, City c2)
     {
+		if (c1.GetCityCenter () == null || c2.GetCityCenter () == null)
+			return Mathf.Infinity;
         return TilePos.DistanceBetween(c1.GetCityCenter(), c2.GetCityCenter());
     }
     public TilePos GetTilePosAt(int x, int y)
@@ -336,19 +361,24 @@ public class WorldGenerator : MonoBehaviour {
     [SerializeField]
     float perlinScale = 5.0f;
 
+	System.DateTime begin;
+
 
 
     // Use this for initialization
     void Start() {
+		begin = System.DateTime.Now;
         screenSize = new Vector2(Camera.main.orthographicSize * Camera.main.aspect, Camera.main.orthographicSize) * 2;
         tileSizeX = housesPrefab[(int)HouseType.CHURCH].GetComponent<SpriteRenderer>().bounds.size.x;
         tileSizeY = housesPrefab[(int)HouseType.CHURCH].GetComponent<SpriteRenderer>().bounds.size.y;
         tileNumberX = (int)(screenSize.x / tileSizeX * worldSizeX);
         tileNumberY = (int)(screenSize.y / tileSizeY * worldSizeY);
         GenerateWorld();
+		Debug.Log ("Total generation time: " + (System.DateTime.Now - begin).TotalSeconds);
     }
     void GenerateWorld()
     { 
+		
         tiles = new TilePos[tileNumberX, tileNumberY];
         for(int x = 0; x < tileNumberX;x++)
         {
@@ -402,7 +432,8 @@ public class WorldGenerator : MonoBehaviour {
         Debug.Log("City number: " + cities.Count);
         foreach (var city in cities)
         {
-           
+			if (city.GetCityCenter () == null)
+				continue;
             //Instantiate the Church
             GameObject church = Instantiate(housesPrefab[(int)HouseType.CHURCH]);
             church.transform.position = new Vector3(
@@ -442,8 +473,9 @@ public class WorldGenerator : MonoBehaviour {
             if (city.tileInCity(tile))
                 return;
         }
-        Debug.Log("Creating New City");
-        List<TilePos> newCityTiles = new List<TilePos>();
+		Debug.Log("Creating New City time: "+(System.DateTime.Now-begin).TotalSeconds);
+        
+		List<TilePos> newCityTiles = new List<TilePos>();
         //BFS around to get the whole city
         Queue<TilePos> nextTiles = new Queue<TilePos>();
         TilePos currentTile = tile;
@@ -501,6 +533,8 @@ public class WorldGenerator : MonoBehaviour {
                 {
                     if (i == 0 && j == 0)
                         continue;
+					if (city.GetCityCenter () == null)
+						continue;
                     if (city.GetCityCenter().GetPosX() + i == tileNumberX || 
                         city.GetCityCenter().GetPosY() + j == tileNumberY ||
                         city.GetCityCenter().GetPosX() + i == -1 ||
@@ -577,13 +611,14 @@ public class WorldGenerator : MonoBehaviour {
     void GeneratePath(City origin, City target)
     {
         //BFS with priority on direction to target
-        Debug.Log("Generating Path");
+		Debug.Log("Generating Path time: "+(System.DateTime.Now-begin).TotalSeconds);
 
         Queue<TilePos> nextTilePos = new Queue<TilePos>();
 
         TilePos originPos = origin.GetCityCenter();
         TilePos targetPos = target.GetCityCenter();
-
+		if (originPos == null || targetPos == null)
+			return;
         TilePos currentPos = originPos;
         while(currentPos != targetPos)
         {
@@ -592,6 +627,7 @@ public class WorldGenerator : MonoBehaviour {
             {
                 for(int j = -1; j <= 1; j++)
                 {
+
                     if (i == j || i == -j)
                         continue;
                     if (currentPos.GetPosX() + i == -1 ||
@@ -602,7 +638,7 @@ public class WorldGenerator : MonoBehaviour {
                     TilePos neighbor = tiles[currentPos.GetPosX() + i,
                         currentPos.GetPosY() + j];
                     //Check if not already visited by other BFS
-                    if(neighbor.GetTarget() != targetPos)
+					if(neighbor.GetTarget() != targetPos || neighbor.GetOrigin() != originPos)
                         neighbor.Reset();
                     
                     if (neighbor.GetVisited() || neighbor.GetPerlinValue() < perlinForestDensityMax)
@@ -610,8 +646,10 @@ public class WorldGenerator : MonoBehaviour {
 
                     neighbor.SetVisited();
                     neighbor.SetTarget(targetPos);
+					neighbor.SetOrigin (originPos);
                     neighbor.SetDistanceToTarget(
-                        TilePos.DistanceBetween(neighbor, targetPos)
+						TilePos.DistanceBetween(neighbor, targetPos)+
+						TilePos.DistanceBetween(currentPos, targetPos)*TilePos.DistanceToDiagonal(originPos, targetPos, neighbor)
                         );
                     neighbor.SetParent(currentPos);
                     tmpPos.Add(neighbor);
