@@ -106,7 +106,7 @@ public class CellularAutomaton : MonoBehaviour {
 				{
 					for (int dy = -1; dy <= 1; dy++) 
 					{
-						if (dx == dy || dx == -dy)
+						if (dx == 0 && dy == 0)
 							continue;
 						Vector2 neighborPos = pos + new Vector2 (dx, dy);
 						if (cellules.ContainsKey (neighborPos))
@@ -114,21 +114,19 @@ public class CellularAutomaton : MonoBehaviour {
 					}
 				}
 				//Debug.Log (neighborNmb);
-				if (cellules.ContainsKey (pos)) {
-					switch (neighborNmb) {
-					case 0:
-					case 1:
-					case 4:
+				if (cellules.ContainsKey (pos))
+                {
+					if(neighborNmb<4)
+                    { 
 						toDestroy.Add (pos);
-						break;
+						
 					
 					}
-				} else {
-					switch (neighborNmb) {
-
-					case 3:
+				} else
+                {
+					if(neighborNmb>4)
+                    { 
 						toCreate.Add (pos);
-						break;
 					}
 				}
 			}
